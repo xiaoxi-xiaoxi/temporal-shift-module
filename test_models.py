@@ -79,8 +79,10 @@ def accuracy(output, target, topk=(1,)):
     correct = pred.eq(target.view(1, -1).expand_as(pred))
     res = []
     for k in topk:
-         correct_k = correct[:k].view(-1).float().sum(0)
+         # correct_k = correct[:k].view(-1).float().sum(0)
+         correct_k = correct[:k].reshape(-1).float().sum(0)
          res.append(correct_k.mul_(100.0 / batch_size))
+
     return res
 
 
@@ -138,7 +140,7 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
         from ops.temporal_shift import make_temporal_pool
         make_temporal_pool(net.base_model, this_test_segments)  # since DataParallel
 
-    checkpoint = torch.load(this_weights)
+    checkpoint = torch.load(this_weights,map_location='cpu')
     checkpoint = checkpoint['state_dict']
 
     # base_dict = {('base_model.' + k).replace('base_model.fc', 'new_fc'): v for k, v in list(checkpoint.items())}
@@ -146,11 +148,15 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
     replace_dict = {'base_model.classifier.weight': 'new_fc.weight',
                     'base_model.classifier.bias': 'new_fc.bias',
                     }
+    # replace_dict = {'classifier.weight': 'new_fc.weight',
+    #                 'classifier.bias': 'new_fc.bias',
+    #                 }
     for k, v in replace_dict.items():
         if k in base_dict:
             base_dict[v] = base_dict.pop(k)
 
-    net.load_state_dict(base_dict)
+    # net.load_state_dict(base_dict)
+    # net.base_model.load_state_dict(base_dict)
 
     input_size = net.scale_size if args.full_res else net.input_size
     if args.test_crops == 1:
@@ -187,7 +193,8 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
                            GroupNormalize(net.input_mean, net.input_std),
                        ]), dense_sample=args.dense_sample, twice_sample=args.twice_sample),
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.workers, pin_memory=True,
+            # num_workers=args.workers, pin_memory=True,
+            num_workers=0, pin_memory=True,
     )
 
     if args.gpus is not None:
@@ -195,7 +202,7 @@ for this_weights, this_test_segments, test_file in zip(weights_list, test_segmen
     else:
         devices = list(range(args.workers))
 
-    net = torch.nn.DataParallel(net.cuda())
+    # net = torch.nn.DataParallel(net.cuda())
     net.eval()
 
     data_gen = enumerate(data_loader)
@@ -245,7 +252,8 @@ def eval_video(video_data, net, this_test_segments, modality):
 
         rst = rst.data.cpu().numpy().copy()
 
-        if net.module.is_shift:
+        # if net.module.is_shift:
+        if net.is_shift:
             rst = rst.reshape(batch_size, num_class)
         else:
             rst = rst.reshape((batch_size, -1, num_class)).mean(axis=1).reshape((batch_size, num_class))
